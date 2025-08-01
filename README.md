@@ -13,7 +13,7 @@ This project implements a ROS 2 node that acts as an intelligent agent, translat
 
 ## Prerequisites
 
-- ROS 2 (Humble, Iron, etc.)
+- ROS 2 (Humble)
 - A simulated or real robot that subscribes to `/cmd_vel` (e.g., TurtleBot3, turtlesim).
 - Python 3
 - A Google AI API Key.
