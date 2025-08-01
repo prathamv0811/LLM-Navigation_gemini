@@ -22,8 +22,8 @@ This project implements a ROS 2 node that acts as an intelligent agent, translat
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repository-url>
-    cd <your-repository-name>
+    git clone <https://github.com/prathamv0811/LLM-Navigation_gemini.git>
+    cd llm-ros2-agent 
     ```
 
 2.  **Install Python dependencies:**
