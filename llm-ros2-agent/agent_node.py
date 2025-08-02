@@ -2,6 +2,7 @@ import os
 import rclpy
 import json
 import time
+import threading
 import math
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -21,9 +22,9 @@ class LLMAgentNode(Node):
 
         # Ensure the Google AI API key is set
         if 'GOOGLE_API_KEY' not in os.environ:
-            self.get_logger().error("GOOGLE_API_KEY environment variable not set!")
-            rclpy.shutdown()
-            return
+            msg = "GOOGLE_API_KEY environment variable not set! Cannot start node."
+            self.get_logger().fatal(msg)
+            raise RuntimeError(msg)
 
         # Configure the generative AI client
         genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
@@ -36,6 +37,7 @@ class LLMAgentNode(Node):
             self.odom_callback,
             10)
         self.current_pose = None
+        self.odom_received_event = threading.Event()
         self.get_logger().info("Subscribed to /odom topic.")
 
         # Create a publisher for the /cmd_vel topic
@@ -96,6 +98,9 @@ class LLMAgentNode(Node):
     def odom_callback(self, msg: Odometry):
         """Callback to continuously update the robot's current pose."""
         self.current_pose = msg.pose.pose
+        if not self.odom_received_event.is_set():
+            self.get_logger().info("First odometry message received.")
+            self.odom_received_event.set()
 
     def get_yaw_from_quaternion(self, quaternion):
         """Convert quaternion to Euler angles and return yaw."""
@@ -187,6 +192,18 @@ class LLMAgentNode(Node):
 
     def run_agent_loop(self):
         """Main loop to get user input from the terminal and interact with the LLM."""
+        self.get_logger().info("Waiting for the first odometry message to initialize...")
+
+        # Wait for the odom_received_event to be set, with a timeout.
+        # This ensures we don't start accepting commands before the robot knows its position.
+        if not self.odom_received_event.wait(timeout=10.0):
+            self.get_logger().error("Timed out waiting for odometry data. The /odom topic might not be publishing.")
+            self.speak("I can't determine my location. Please check the robot's sensors.")
+            return
+
+        self.get_logger().info("Initialization complete. Ready for commands.")
+        self.speak("I am ready for your commands.")
+
         while rclpy.ok():
             try:
                 command = input("Enter a command for the robot (or 'quit'): ")
@@ -225,14 +242,29 @@ class LLMAgentNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    llm_agent_node = LLMAgentNode()
+    llm_agent_node = None
+    spin_thread = None
     try:
+        llm_agent_node = LLMAgentNode()
+
+        # rclpy.spin() blocks, so we run it in a separate thread.
+        # This allows the main thread to handle user input with input().
+        spin_thread = threading.Thread(target=rclpy.spin, args=(llm_agent_node,))
+        spin_thread.start()
+
         llm_agent_node.run_agent_loop()
-    except KeyboardInterrupt:
-        pass
+
+    except (KeyboardInterrupt, RuntimeError) as e:
+        if llm_agent_node:
+            llm_agent_node.get_logger().info(f"Shutting down: {e}")
+        else:
+            print(f"Shutting down due to initialization error: {e}")
     finally:
-        llm_agent_node.destroy_node()
         rclpy.shutdown()
+        if spin_thread and spin_thread.is_alive():
+            spin_thread.join()
+        if llm_agent_node:
+            llm_agent_node.destroy_node()
 
 if __name__ == '__main__':
     main()
